@@ -1,0 +1,46 @@
+<?php
+
+namespace Tinkoff\Invest\Clients;
+
+use Tinkoff\Invest\Config\Config;
+use Tinkoff\Invest\Services\AccountService;
+use Tinkoff\Invest\Services\BondsService;
+use Tinkoff\Invest\Services\OperationsService;
+use Tinkoff\Invest\Services\PortfolioService;
+use Tinkoff\Invest\Services\ServiceFactory;
+use Tinkoff\Invest\Transport\HttpClient;
+
+class InvestClient
+{
+    private HttpClient $httpClient;
+    private array $services = [];
+
+    public function __construct(Config $config)
+    {
+        $this->httpClient = new HttpClient(
+            $config->getApiUrl(),
+            $config->getApiToken(),
+            $config->getApiTimeout()
+        );
+    }
+
+    public function accounts(): AccountService
+    {
+        return $this->services['accounts'] ??= ServiceFactory::createAccountService($this->httpClient);
+    }
+
+    public function portfolio(): PortfolioService
+    {
+        return $this->services['portfolio'] ??= ServiceFactory::createPortfolioService($this->httpClient);
+    }
+
+    public function operations(): OperationsService
+    {
+        return $this->services['operations'] ??= ServiceFactory::createOperationsService($this->httpClient);
+    }
+
+    public function bonds(): BondsService
+    {
+        return $this->services['bonds'] ??= ServiceFactory::createBondsService($this->httpClient);
+    }
+}

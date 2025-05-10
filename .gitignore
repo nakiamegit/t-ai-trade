@@ -1,0 +1,10 @@
+/vendor/
+/logs/
+.phpunit.result.cache
+.idea/
+*.log
+.env
+/.osp/
+/config/tinkoff.php
+/tests/
+/public/
