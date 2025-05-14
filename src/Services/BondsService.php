@@ -128,12 +128,16 @@ final class BondsService
      * @throws ApiException
      * @see https://tinkoff.github.io/investAPI/instruments/#getaccruedinterests
      */
-    public function getAccruedInterests(string $figi): ?AccruedInterest
+    public function getAccruedInterests(string $figi, DateTimeInterface $from, DateTimeInterface $to): ?AccruedInterest
     {
         $response = $this->httpClient->request(
             'POST',
             'tinkoff.public.invest.api.contract.v1.InstrumentsService/GetAccruedInterests',
-            ['figi' => $figi]
+            [
+                'figi' => $figi,
+                'from' => $from->format(DateTimeInterface::ATOM),
+                'to' => $to->format(DateTimeInterface::ATOM)
+            ]
         );
 
         if (empty($response['accruedInterests'])) {
