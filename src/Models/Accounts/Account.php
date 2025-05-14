@@ -8,7 +8,7 @@ use Tinkoff\Invest\Models\Enums\AccountType;
 
 /**
  * Данные по счёту.
- * @see https://tinkoff.github.io/investAPI/instruments/#bond
+ * @see https://tinkoff.github.io/investAPI/users/#getaccounts
  */
 class Account
 {
