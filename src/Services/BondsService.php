@@ -122,29 +122,34 @@ final class BondsService
 
     /**
      * Получает накопленный купонный доход (НКД) по облигации.
+     * Если даты не указаны, возвращает НКД на текущую дату.
      *
      * @param string $figi FIGI облигации
+     * @param DateTimeInterface|null $from Начало периода (по умолчанию текущая дата)
+     * @param DateTimeInterface|null $to Конец периода (по умолчанию текущая дата)
      * @return AccruedInterest|null Данные НКД или null если не найдены
-     * @throws ApiException
+     * @throws Exception
      * @see https://tinkoff.github.io/investAPI/instruments/#getaccruedinterests
      */
-    public function getAccruedInterests(string $figi, DateTimeInterface $from, DateTimeInterface $to): ?AccruedInterest
+    public function getAccruedInterests(string $figi, ?DateTimeInterface $from = null, ?DateTimeInterface $to = null): ?AccruedInterest
     {
+        $now = new DateTimeImmutable();
+
+        $params = [
+            'figi' => $figi,
+            'from' => ($from ?? $now)->format(DateTimeInterface::ATOM),
+            'to' => ($to ?? $now)->format(DateTimeInterface::ATOM)
+        ];
+
         $response = $this->httpClient->request(
             'POST',
             'tinkoff.public.invest.api.contract.v1.InstrumentsService/GetAccruedInterests',
-            [
-                'figi' => $figi,
-                'from' => $from->format(DateTimeInterface::ATOM),
-                'to' => $to->format(DateTimeInterface::ATOM)
-            ]
+            $params
         );
 
-        if (empty($response['accruedInterests'])) {
-            return null;
-        }
-
-        return $this->transformAccruedInterest($response['accruedInterests'][0]);
+        return empty($response['accruedInterests'])
+            ? null
+            : $this->transformAccruedInterest($response['accruedInterests'][0]);
     }
 
     /**
