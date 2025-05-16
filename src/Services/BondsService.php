@@ -6,6 +6,10 @@ use DateTimeImmutable;
 use DateTimeInterface;
 use Exception;
 use InvalidArgumentException;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
+use Tinkoff\Invest\Logger;
+use Tinkoff\Invest\Models\Enums\BondEventType;
 use Tinkoff\Invest\Models\Enums\CouponType;
 use Tinkoff\Invest\Models\Enums\RealExchange;
 use Tinkoff\Invest\Models\Enums\RiskLevel;
@@ -14,11 +18,13 @@ use Tinkoff\Invest\Models\Instruments\Bonds\AccruedInterest;
 use Tinkoff\Invest\Models\Instruments\Bonds\AssetBond;
 use Tinkoff\Invest\Models\Instruments\Bonds\Bond;
 use Tinkoff\Invest\Models\Instruments\Bonds\BondCollection;
+use Tinkoff\Invest\Models\Instruments\Bonds\BondEvent;
 use Tinkoff\Invest\Models\Instruments\Bonds\Coupon;
 use Tinkoff\Invest\Models\DataTypes\MoneyValue;
 use Tinkoff\Invest\Models\DataTypes\Quotation;
 use Tinkoff\Invest\Transport\HttpClient;
 use Tinkoff\Invest\Exceptions\ApiException;
+use Tinkoff\Invest\Transport\HttpClientInterface;
 
 /**
  * Сервис для работы с облигациями.
@@ -30,9 +36,9 @@ final class BondsService
     /**
      * @param HttpClient $httpClient HTTP клиент
      */
-    public function __construct(private HttpClient $httpClient)
-    {
-    }
+    public function __construct(
+        private HttpClientInterface $httpClient
+    ) {}
 
     /**
      * Получает список всех облигаций.
@@ -131,7 +137,11 @@ final class BondsService
      * @throws Exception
      * @see https://tinkoff.github.io/investAPI/instruments/#getaccruedinterests
      */
-    public function getAccruedInterests(string $figi, ?DateTimeInterface $from = null, ?DateTimeInterface $to = null): ?AccruedInterest
+    public function getAccruedInterests(
+        string             $figi,
+        ?DateTimeInterface $from = null,
+        ?DateTimeInterface $to = null
+    ): ?AccruedInterest
     {
         $now = new DateTimeImmutable();
 
@@ -176,6 +186,42 @@ final class BondsService
         }
 
         return null;
+    }
+
+    /**
+     * Получает события по облигации за период.
+     *
+     * @param string $instrumentId Идентификатор инструмента (figi или instrument_uid)
+     * @param DateTimeInterface $from Начало периода
+     * @param DateTimeInterface $to Конец периода
+     * @param BondEventType|null $type Тип события (опционально)
+     * @return BondEvent[] Массив событий
+     * @throws ApiException
+     * @see https://developer.tbank.ru/invest/services/instruments/methods#getbondeventsrequesteventtype
+     */
+    public function getBondEvents(
+        string $instrumentId,
+        DateTimeInterface $from,
+        DateTimeInterface $to,
+        ?BondEventType $type = null
+    ): array {
+        $params = [
+            'instrument_id' => $instrumentId,
+            'from' => $from->format(DateTimeInterface::ATOM),
+            'to' => $to->format(DateTimeInterface::ATOM)
+        ];
+
+        if ($type !== null) {
+            $params['type'] = $type->value;
+        }
+
+        $response = $this->httpClient->request(
+            'POST',
+            'tinkoff.public.invest.api.contract.v1.InstrumentsService/GetBondEvents',
+            $params
+        );
+
+        return $this->transformBondEventsResponse($response['events'] ?? []);
     }
 
     /**
@@ -355,4 +401,68 @@ final class BondsService
             basicSector: $bondData['basicSector'] ?? null
         );
     }
+
+    /**
+     * Преобразует данные событий облигации из API.
+     *
+     * @param array $eventsData Данные событий
+     * @return BondEvent[] Массив событий
+     */
+    private function transformBondEventsResponse(array $eventsData): array
+    {
+        return array_filter(
+            array_map(
+                function (array $eventData): ?BondEvent {
+                    try {
+                        return $this->transformBondEvent($eventData);
+                    } catch (Exception) {
+                        return null;
+                    }
+                },
+                $eventsData
+            )
+        );
+    }
+
+    /**
+     * Преобразует данные одного события облигации из API.
+     *
+     * @param array $data Данные события
+     * @return BondEvent Объект события
+     * @throws InvalidArgumentException|Exception
+     */
+    /**
+     * Преобразует данные одного события облигации из API.
+     *
+     * @param array $data Данные события
+     * @return BondEvent Объект события
+     * @throws InvalidArgumentException|Exception
+     */
+    private function transformBondEvent(array $data): BondEvent
+    {
+        return new BondEvent(
+            instrumentId: $data['instrumentId'] ?? '',
+            eventNumber: (int)($data['eventNumber'] ?? 0),
+            eventDate: new DateTimeImmutable($data['eventDate']),
+            eventType: BondEventType::fromApi($data['eventType'] ?? 'EVENT_TYPE_UNSPECIFIED'),
+            eventTotalVol: Quotation::fromApi($data['eventTotalVol'] ?? ['units' => '0', 'nano' => 0]),
+            fixDate: isset($data['fixDate']) ? new DateTimeImmutable($data['fixDate']) : null,
+            rateDate: isset($data['rateDate']) ? new DateTimeImmutable($data['rateDate']) : null,
+            defaultDate: isset($data['defaultDate']) ? new DateTimeImmutable($data['defaultDate']) : null,
+            realPayDate: isset($data['realPayDate']) ? new DateTimeImmutable($data['realPayDate']) : null,
+            payDate: isset($data['payDate']) ? new DateTimeImmutable($data['payDate']) : null,
+            payOneBond: isset($data['payOneBond']) ? MoneyValue::fromApi($data['payOneBond']) : null,
+            moneyFlowVal: isset($data['moneyFlowVal']) ? MoneyValue::fromApi($data['moneyFlowVal']) : null,
+            execution: $data['execution'] ?? null,
+            operationType: $data['operationType'] ?? null,
+            value: isset($data['value']) ? Quotation::fromApi($data['value']) : null,
+            note: $data['note'] ?? null,
+            convertToFinToolId: $data['convertToFinToolId'] ?? null,
+            couponStartDate: isset($data['couponStartDate']) ? new DateTimeImmutable($data['couponStartDate']) : null,
+            couponEndDate: isset($data['couponEndDate']) ? new DateTimeImmutable($data['couponEndDate']) : null,
+            couponPeriod: isset($data['couponPeriod']) ? (int)$data['couponPeriod'] : null,
+            couponInterestRate: isset($data['couponInterestRate']) ? Quotation::fromApi($data['couponInterestRate']) : null
+        );
+    }
 }
+
