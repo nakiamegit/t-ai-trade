@@ -1,6 +1,6 @@
 <?php
 
-namespace Tinkoff\Invest\Config;
+namespace Tinkoff\Invest;
 
 use Tinkoff\Invest\Exceptions\ConfigException;
 
@@ -49,6 +49,11 @@ class Config
     public function isLoggingEnabled(): bool
     {
         return $this->config['logging']['enabled'] ?? false;
+    }
+
+    public function isLoggingFull(): bool
+    {
+        return $this->config['logging']['full'] ?? false;
     }
 
     public function getLogPath(): string

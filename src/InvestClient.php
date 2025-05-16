@@ -1,27 +1,34 @@
 <?php
 
-namespace Tinkoff\Invest\Clients;
+namespace Tinkoff\Invest;
 
-use Tinkoff\Invest\Config\Config;
+use Tinkoff\Invest\Config;
+use Tinkoff\Invest\Logger;
+use Tinkoff\Invest\Transport\HttpClient;
+use Tinkoff\Invest\Transport\HttpClientInterface;
+use Tinkoff\Invest\Transport\LoggableHttpClient;
+use Tinkoff\Invest\Services\ServiceFactory;
 use Tinkoff\Invest\Services\AccountService;
 use Tinkoff\Invest\Services\BondsService;
 use Tinkoff\Invest\Services\OperationsService;
 use Tinkoff\Invest\Services\PortfolioService;
-use Tinkoff\Invest\Services\ServiceFactory;
-use Tinkoff\Invest\Transport\HttpClient;
 
 class InvestClient
 {
-    private HttpClient $httpClient;
+    private HttpClientInterface $httpClient;
     private array $services = [];
 
     public function __construct(Config $config)
     {
-        $this->httpClient = new HttpClient(
+        $baseClient = new HttpClient(
             $config->getApiUrl(),
             $config->getApiToken(),
             $config->getApiTimeout()
         );
+
+        $this->httpClient = $config->isLoggingEnabled()
+            ? new LoggableHttpClient($baseClient, new Logger($config, $config->isLoggingFull()))
+            : $baseClient;
     }
 
     public function accounts(): AccountService

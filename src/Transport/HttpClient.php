@@ -1,5 +1,4 @@
 <?php
-// src/Transport/HttpClient.php
 
 namespace Tinkoff\Invest\Transport;
 
@@ -7,7 +6,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use Tinkoff\Invest\Exceptions\ApiException;
 
-class HttpClient
+class HttpClient implements HttpClientInterface
 {
     private Client $client;
     private string $baseUrl;
