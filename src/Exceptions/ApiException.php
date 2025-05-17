@@ -1,24 +1,35 @@
 <?php
-// src/Exceptions/ApiException.php
 
 namespace Tinkoff\Invest\Exceptions;
 
+use Throwable;
+
 class ApiException extends \RuntimeException
 {
-    private ?array $responseData;
-
     public function __construct(
         string $message,
+        private array $context = [],
         int $code = 0,
-        \Throwable $previous = null,
-        ?array $responseData = null
+        ?Throwable $previous = null
     ) {
         parent::__construct($message, $code, $previous);
-        $this->responseData = $responseData;
     }
 
-    public function getResponseData(): ?array
+    public function getContext(): array
     {
-        return $this->responseData;
+        return $this->context;
+    }
+
+    public static function create(
+        string $message,
+        array $context = [],
+        ?Throwable $previous = null
+    ): static {
+        return new static(
+            $message,
+            $context,
+            $previous?->getCode() ?? 0,
+            $previous
+        );
     }
 }

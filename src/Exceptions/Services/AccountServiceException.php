@@ -6,18 +6,12 @@ use Tinkoff\Invest\Exceptions\ServiceException;
 
 class AccountServiceException extends ServiceException
 {
-    private const ERROR_BAD_REQUEST = 400;
-    private const ERROR_FORBIDDEN = 403;
-    private const ERROR_NOT_FOUND = 404;
-    private const ERROR_SERVER_ERROR = 500;
-    private const ERROR_SERVICE_UNAVAILABLE = 503;
-
     public static function accountNotFound(string $accountId): self
     {
         return new self(
             "Account not found: {$accountId}",
             ['account_id' => $accountId],
-            self::ERROR_NOT_FOUND
+            static::STATUS_NOT_FOUND
         );
     }
 
@@ -26,7 +20,7 @@ class AccountServiceException extends ServiceException
         return new self(
             "Invalid account response structure",
             ['api_response' => $response],
-            self::ERROR_SERVER_ERROR,
+            static::STATUS_SERVER_ERROR,
             $previous
         );
     }
@@ -36,16 +30,16 @@ class AccountServiceException extends ServiceException
         return new self(
             "Access denied to account {$accountId}",
             ['account_id' => $accountId],
-            self::ERROR_FORBIDDEN
+            static::STATUS_FORBIDDEN
         );
     }
 
-    public static function serviceUnavailable(string $serviceName, \Throwable $previous = null): self
+    public static function serviceUnavailable(string $serviceName, \Throwable $previous = null): static
     {
-        return new self(
+        return new static(
             "Service unavailable for method {$serviceName}",
             ['service' => $serviceName],
-            self::ERROR_SERVICE_UNAVAILABLE,
+            static::STATUS_SERVICE_UNAVAILABLE,
             $previous
         );
     }
@@ -55,7 +49,7 @@ class AccountServiceException extends ServiceException
         return new self(
             "Invalid request: {$message}",
             $context,
-            self::ERROR_BAD_REQUEST
+            static::STATUS_BAD_REQUEST
         );
     }
 
@@ -64,7 +58,7 @@ class AccountServiceException extends ServiceException
         return new self(
             "Margin attributes not found for account: {$accountId}",
             ['account_id' => $accountId],
-            self::ERROR_NOT_FOUND
+            static::STATUS_NOT_FOUND
         );
     }
 }
