@@ -4,27 +4,21 @@ namespace Tinkoff\Invest\Services;
 
 use DateTimeImmutable;
 use DateTimeInterface;
-use Exception;
-use InvalidArgumentException;
-use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
-use Tinkoff\Invest\Logger;
+use Tinkoff\Invest\Transport\HttpClientInterface;
+use Tinkoff\Invest\Models\Instruments\Bonds\Bond;
+use Tinkoff\Invest\Models\Instruments\Bonds\BondCollection;
+use Tinkoff\Invest\Models\Instruments\Bonds\AssetBond;
+use Tinkoff\Invest\Models\Instruments\Bonds\Coupon;
+use Tinkoff\Invest\Models\Instruments\Bonds\BondEvent;
+use Tinkoff\Invest\Models\Instruments\Bonds\AccruedInterest;
 use Tinkoff\Invest\Models\Enums\BondEventType;
 use Tinkoff\Invest\Models\Enums\CouponType;
 use Tinkoff\Invest\Models\Enums\RealExchange;
 use Tinkoff\Invest\Models\Enums\RiskLevel;
 use Tinkoff\Invest\Models\Enums\SecurityTradingStatus;
-use Tinkoff\Invest\Models\Instruments\Bonds\AccruedInterest;
-use Tinkoff\Invest\Models\Instruments\Bonds\AssetBond;
-use Tinkoff\Invest\Models\Instruments\Bonds\Bond;
-use Tinkoff\Invest\Models\Instruments\Bonds\BondCollection;
-use Tinkoff\Invest\Models\Instruments\Bonds\BondEvent;
-use Tinkoff\Invest\Models\Instruments\Bonds\Coupon;
 use Tinkoff\Invest\Models\DataTypes\MoneyValue;
 use Tinkoff\Invest\Models\DataTypes\Quotation;
-use Tinkoff\Invest\Transport\HttpClient;
-use Tinkoff\Invest\Exceptions\ApiException;
-use Tinkoff\Invest\Transport\HttpClientInterface;
+use Tinkoff\Invest\Exceptions\Services\BondsServiceException;
 
 /**
  * Сервис для работы с облигациями.
@@ -33,29 +27,35 @@ use Tinkoff\Invest\Transport\HttpClientInterface;
  */
 final class BondsService
 {
-    /**
-     * @param HttpClient $httpClient HTTP клиент
-     */
-    public function __construct(
-        private HttpClientInterface $httpClient
-    ) {}
+    private HttpClientInterface $httpClient;
+
+    public function __construct(HttpClientInterface $httpClient)
+    {
+        $this->httpClient = $httpClient;
+    }
 
     /**
      * Получает список всех облигаций.
      *
      * @return BondCollection Коллекция облигаций
-     * @throws ApiException
      * @see https://tinkoff.github.io/investAPI/instruments/#bonds
      */
     public function getAllBonds(): BondCollection
     {
-        $response = $this->httpClient->request(
-            'POST',
-            'tinkoff.public.invest.api.contract.v1.InstrumentsService/Bonds',
-            ['instrumentStatus' => 'INSTRUMENT_STATUS_BASE']
-        );
+        try {
+            $response = $this->httpClient->post(
+                'tinkoff.public.invest.api.contract.v1.InstrumentsService/Bonds',
+                ['instrumentStatus' => 'INSTRUMENT_STATUS_BASE']
+            );
 
-        return new BondCollection($this->transformBondsResponse($response));
+            if (!isset($response['instruments'])) {
+                throw BondsServiceException::invalidBondResponse($response);
+            }
+
+            return $this->transformBondsResponse($response);
+        } catch (\Throwable $e) {
+            throw BondsServiceException::serviceUnavailable('GetAllBonds', $e);
+        }
     }
 
     /**
@@ -63,18 +63,25 @@ final class BondsService
      *
      * @param string $figi FIGI облигации
      * @return Bond|null Данные облигации или null если не найдена
-     * @throws Exception
      * @see https://tinkoff.github.io/investAPI/instruments/#bondby
      */
     public function getBondByFigi(string $figi): ?Bond
     {
-        $response = $this->httpClient->request(
-            'POST',
-            'tinkoff.public.invest.api.contract.v1.InstrumentsService/BondBy',
-            ['idType' => 'INSTRUMENT_ID_TYPE_FIGI', 'id' => $figi]
-        );
+        try {
+            $response = $this->httpClient->request(
+                'POST',
+                'tinkoff.public.invest.api.contract.v1.InstrumentsService/BondBy',
+                ['idType' => 'INSTRUMENT_ID_TYPE_FIGI', 'id' => $figi]
+            );
 
-        return isset($response['instrument']) ? $this->transformBond($response['instrument']) : null;
+            if (!isset($response['instrument'])) {
+                return null;
+            }
+
+            return $this->transformBond($response['instrument']);
+        } catch (\Throwable $e) {
+            throw BondsServiceException::serviceUnavailable('GetBondByFigi', $e);
+        }
     }
 
     /**
@@ -83,22 +90,29 @@ final class BondsService
      * @param string $ticker Ticker облигации
      * @param string $classCode Код класса инструмента (опционально)
      * @return Bond|null Данные облигации или null если не найдена
-     * @throws Exception
      * @see https://tinkoff.github.io/investAPI/instruments/#bondby
      */
     public function getBondByTicker(string $ticker, string $classCode = ''): ?Bond
     {
-        $response = $this->httpClient->request(
-            'POST',
-            'tinkoff.public.invest.api.contract.v1.InstrumentsService/BondBy',
-            [
-                'idType' => 'INSTRUMENT_ID_TYPE_TICKER',
-                'id' => $ticker,
-                'classCode' => $classCode
-            ]
-        );
+        try {
+            $response = $this->httpClient->request(
+                'POST',
+                'tinkoff.public.invest.api.contract.v1.InstrumentsService/BondBy',
+                [
+                    'idType' => 'INSTRUMENT_ID_TYPE_TICKER',
+                    'id' => $ticker,
+                    'classCode' => $classCode
+                ]
+            );
 
-        return isset($response['instrument']) ? $this->transformBond($response['instrument']) : null;
+            if (!isset($response['instrument'])) {
+                return null;
+            }
+
+            return $this->transformBond($response['instrument']);
+        } catch (\Throwable $e) {
+            throw BondsServiceException::serviceUnavailable('GetBondByTicker', $e);
+        }
     }
 
     /**
@@ -108,22 +122,34 @@ final class BondsService
      * @param DateTimeInterface $from Начало периода
      * @param DateTimeInterface $to Конец периода
      * @return Coupon[] Массив купонов
-     * @throws ApiException
+     * @throws BondsServiceException
      * @see https://tinkoff.github.io/investAPI/instruments/#getbondcoupons
      */
     public function getBondCoupons(string $figi, DateTimeInterface $from, DateTimeInterface $to): array
     {
-        $response = $this->httpClient->request(
-            'POST',
-            'tinkoff.public.invest.api.contract.v1.InstrumentsService/GetBondCoupons',
-            [
-                'figi' => $figi,
-                'from' => $from->format(DateTimeInterface::ATOM),
-                'to' => $to->format(DateTimeInterface::ATOM)
-            ]
-        );
+        if ($from > $to) {
+            throw BondsServiceException::invalidDateRange($from, $to);
+        }
 
-        return $this->transformCouponsResponse($response['coupons'] ?? $response['events'] ?? []);
+        try {
+            $response = $this->httpClient->post(
+                'tinkoff.public.invest.api.contract.v1.InstrumentsService/GetBondCoupons',
+                [
+                    'figi' => $figi,
+                    'from' => $from->format(DateTimeInterface::ATOM),
+                    'to' => $to->format(DateTimeInterface::ATOM)
+                ]
+            );
+
+            if (!isset($response['coupons']) && !isset($response['events'])) {
+                throw BondsServiceException::invalidCouponData($response);
+            }
+
+            $couponsData = $response['coupons'] ?? $response['events'];
+            return $this->transformCouponsResponse($couponsData);
+        } catch (\Throwable $e) {
+            throw BondsServiceException::serviceUnavailable('GetBondCoupons', $e);
+        }
     }
 
     /**
@@ -134,7 +160,7 @@ final class BondsService
      * @param DateTimeInterface|null $from Начало периода (по умолчанию текущая дата)
      * @param DateTimeInterface|null $to Конец периода (по умолчанию текущая дата)
      * @return AccruedInterest|null Данные НКД или null если не найдены
-     * @throws Exception
+     * @throws BondsServiceException
      * @see https://tinkoff.github.io/investAPI/instruments/#getaccruedinterests
      */
     public function getAccruedInterests(
@@ -144,22 +170,32 @@ final class BondsService
     ): ?AccruedInterest
     {
         $now = new DateTimeImmutable();
+        $from = $from ?? $now;
+        $to = $to ?? $now;
 
-        $params = [
-            'figi' => $figi,
-            'from' => ($from ?? $now)->format(DateTimeInterface::ATOM),
-            'to' => ($to ?? $now)->format(DateTimeInterface::ATOM)
-        ];
+        if ($from > $to) {
+            throw BondsServiceException::invalidDateRange($from, $to);
+        }
 
-        $response = $this->httpClient->request(
-            'POST',
-            'tinkoff.public.invest.api.contract.v1.InstrumentsService/GetAccruedInterests',
-            $params
-        );
+        try {
+            $response = $this->httpClient->request(
+                'POST',
+                'tinkoff.public.invest.api.contract.v1.InstrumentsService/GetAccruedInterests',
+                [
+                    'figi' => $figi,
+                    'from' => $from->format(DateTimeInterface::ATOM),
+                    'to' => $to->format(DateTimeInterface::ATOM)
+                ]
+            );
 
-        return empty($response['accruedInterests'])
-            ? null
-            : $this->transformAccruedInterest($response['accruedInterests'][0]);
+            if (empty($response['accruedInterests'])) {
+                return null;
+            }
+
+            return $this->transformAccruedInterest($response['accruedInterests'][0]);
+        } catch (\Throwable $e) {
+            throw BondsServiceException::serviceUnavailable('GetAccruedInterests', $e);
+        }
     }
 
     /**
@@ -167,25 +203,32 @@ final class BondsService
      *
      * @param string $assetUid UID актива облигации
      * @return AssetBond|null Данные по активу или null если не найдены
-     * @throws ApiException
+     * @throws BondsServiceException
      * @see https://tinkoff.github.io/investAPI/instruments/#getassets
      */
     public function getAssetBond(string $assetUid): ?AssetBond
     {
-        $response = $this->httpClient->request(
-            'POST',
-            'tinkoff.public.invest.api.contract.v1.InstrumentsService/GetAssets',
-            []
-        );
+        try {
+            $response = $this->httpClient->request(
+                'POST',
+                'tinkoff.public.invest.api.contract.v1.InstrumentsService/GetAssets',
+                []
+            );
 
-        // Ищем нужный актив среди всех
-        foreach ($response['assets'] as $asset) {
-            if ($asset['uid'] === $assetUid && $asset['type'] === 'ASSET_TYPE_BOND') {
-                return $this->transformAssetBond($asset);
+            if (!isset($response['assets'])) {
+                throw BondsServiceException::invalidAssetData($response);
             }
-        }
 
-        return null;
+            foreach ($response['assets'] as $asset) {
+                if ($asset['uid'] === $assetUid && $asset['type'] === 'ASSET_TYPE_BOND') {
+                    return $this->transformAssetBond($asset);
+                }
+            }
+
+            return null;
+        } catch (\Throwable $e) {
+            throw BondsServiceException::serviceUnavailable('GetAssets', $e);
+        }
     }
 
     /**
@@ -196,7 +239,7 @@ final class BondsService
      * @param DateTimeInterface $to Конец периода
      * @param BondEventType|null $type Тип события (опционально)
      * @return BondEvent[] Массив событий
-     * @throws ApiException
+     * @throws BondsServiceException
      * @see https://developer.tbank.ru/invest/services/instruments/methods#getbondeventsrequesteventtype
      */
     public function getBondEvents(
@@ -205,48 +248,55 @@ final class BondsService
         DateTimeInterface $to,
         ?BondEventType $type = null
     ): array {
-        $params = [
-            'instrument_id' => $instrumentId,
-            'from' => $from->format(DateTimeInterface::ATOM),
-            'to' => $to->format(DateTimeInterface::ATOM)
-        ];
-
-        if ($type !== null) {
-            $params['type'] = $type->value;
+        if ($from > $to) {
+            throw BondsServiceException::invalidDateRange($from, $to);
         }
 
-        $response = $this->httpClient->request(
-            'POST',
-            'tinkoff.public.invest.api.contract.v1.InstrumentsService/GetBondEvents',
-            $params
-        );
+        try {
+            $params = [
+                'instrument_id' => $instrumentId,
+                'from' => $from->format(DateTimeInterface::ATOM),
+                'to' => $to->format(DateTimeInterface::ATOM)
+            ];
 
-        return $this->transformBondEventsResponse($response['events'] ?? []);
+            if ($type !== null) {
+                $params['type'] = $type->value;
+            }
+
+            $response = $this->httpClient->request(
+                'POST',
+                'tinkoff.public.invest.api.contract.v1.InstrumentsService/GetBondEvents',
+                $params
+            );
+
+            if (!isset($response['events'])) {
+                throw BondsServiceException::invalidBondEvent($response);
+            }
+
+            return $this->transformBondEventsResponse($response['events']);
+        } catch (\Throwable $e) {
+            throw BondsServiceException::serviceUnavailable('GetBondEvents', $e);
+        }
     }
 
-    /**
-     * Преобразует ответ API в массив облигаций.
-     *
-     * @param array $response Ответ API
-     * @return Bond[] Массив облигаций
-     * @throws ApiException
-     */
-    private function transformBondsResponse(array $response): array
+    private function transformBondsResponse(array $response): BondCollection
     {
         if (!isset($response['instruments']) || !is_array($response['instruments'])) {
-            throw new ApiException('Invalid bonds response: missing instruments field');
+            throw BondsServiceException::invalidBondResponse($response);
         }
 
         $bonds = [];
         foreach ($response['instruments'] as $instrument) {
             try {
                 $bonds[] = $this->transformBond($instrument);
-            } catch (Exception) {
+            } catch (BondsServiceException) {
                 continue;
+            } catch (\Throwable $e) {
+                throw BondsServiceException::invalidBondResponse($response);
             }
         }
 
-        return $bonds;
+        return new BondCollection($bonds);
     }
 
     /**
@@ -254,62 +304,79 @@ final class BondsService
      *
      * @param array $data Данные облигации
      * @return Bond Объект облигации
-     * @throws ApiException|Exception
+     * @throws BondsServiceException|\Exception
      */
     private function transformBond(array $data): Bond
     {
-        return new Bond(
-            figi: $data['figi'],
-            ticker: $data['ticker'],
-            classCode: $data['classCode'] ?? '',
-            isin: $data['isin'],
-            lot: isset($data['lot']) ? (int)$data['lot'] : 1,
-            currency: $data['currency'] ?? 'RUB',
-            klong: isset($data['klong']) ? Quotation::fromApi($data['klong']) : new Quotation("0", 0),
-            kshort: isset($data['kshort']) ? Quotation::fromApi($data['kshort']) : new Quotation("0", 0),
-            dlong: isset($data['dlong']) ? Quotation::fromApi($data['dlong']) : new Quotation("0", 0),
-            dshort: isset($data['dshort']) ? Quotation::fromApi($data['dshort']) : new Quotation("0", 0),
-            dlongMin: isset($data['dlongMin']) ? Quotation::fromApi($data['dlongMin']) : new Quotation("0", 0),
-            dshortMin: isset($data['dshortMin']) ? Quotation::fromApi($data['dshortMin']) : new Quotation("0", 0),
-            shortEnabledFlag: (bool)($data['shortEnabledFlag'] ?? false),
-            name: $data['name'],
-            exchange: $data['exchange'],
-            couponQuantityPerYear: isset($data['couponQuantityPerYear']) ? (int)$data['couponQuantityPerYear'] : 0,
-            minPriceIncrement: isset($data['minPriceIncrement']) ? Quotation::fromApi($data['minPriceIncrement']) : new Quotation("0", 0),
-            apiTradeAvailableFlag: (bool)($data['apiTradeAvailableFlag'] ?? false),
-            realExchange: RealExchange::fromApi($data['realExchange']),
-            maturityDate: isset($data['maturityDate']) ? new DateTimeImmutable($data['maturityDate']) : null,
-            nominal: isset($data['nominal']) ? MoneyValue::fromApi($data['nominal']) : null,
-            initialNominal: isset($data['initialNominal']) ? MoneyValue::fromApi($data['initialNominal']) : null,
-            stateRegDate: isset($data['stateRegDate']) ? new DateTimeImmutable($data['stateRegDate']) : null,
-            placementDate: isset($data['placementDate']) ? new DateTimeImmutable($data['placementDate']) : null,
-            placementPrice: isset($data['placementPrice']) ? MoneyValue::fromApi($data['placementPrice']) : null,
-            aciValue: isset($data['aciValue']) ? MoneyValue::fromApi($data['aciValue']) : null,
-            countryOfRisk: $data['countryOfRisk'] ?? null,
-            countryOfRiskName: $data['countryOfRiskName'] ?? null,
-            sector: $data['sector'] ?? null,
-            issueKind: $data['issueKind'] ?? null,
-            issueSize: isset($data['issueSize']) ? (int)$data['issueSize'] : null,
-            issueSizePlan: isset($data['issueSizePlan']) ? (int)$data['issueSizePlan'] : null,
-            tradingStatus: isset($data['tradingStatus']) ? SecurityTradingStatus::fromApi($data['tradingStatus']) : null,
-            otcFlag: (bool)($data['otcFlag'] ?? false),
-            buyAvailableFlag: (bool)($data['buyAvailableFlag'] ?? false),
-            sellAvailableFlag: (bool)($data['sellAvailableFlag'] ?? false),
-            floatingCouponFlag: (bool)($data['floatingCouponFlag'] ?? false),
-            perpetualFlag: (bool)($data['perpetualFlag'] ?? false),
-            amortizationFlag: (bool)($data['amortizationFlag'] ?? false),
-            uid: $data['uid'] ?? null,
-            positionUid: $data['positionUid'] ?? null,
-            forIisFlag: (bool)($data['forIisFlag'] ?? false),
-            forQualInvestorFlag: (bool)($data['forQualInvestorFlag'] ?? false),
-            weekendFlag: (bool)($data['weekendFlag'] ?? false),
-            blockedTcaFlag: (bool)($data['blockedTcaFlag'] ?? false),
-            subordinatedFlag: (bool)($data['subordinatedFlag'] ?? false),
-            liquidityFlag: (bool)($data['liquidityFlag'] ?? false),
-            first1minCandleDate: isset($data['first1minCandleDate']) ? new DateTimeImmutable($data['first1minCandleDate']) : null,
-            first1dayCandleDate: isset($data['first1dayCandleDate']) ? new DateTimeImmutable($data['first1dayCandleDate']) : null,
-            riskLevel: isset($data['riskLevel']) ? RiskLevel::fromApi($data['riskLevel']) : null
-        );
+        $requiredFields = ['figi', 'ticker', 'name', 'lot', 'currency'];
+        $missingFields = array_diff($requiredFields, array_keys($data));
+
+        if (!empty($missingFields)) {
+            throw BondsServiceException::invalidBondResponse([
+                'message' => 'Missing required bond fields',
+                'missingFields' => $missingFields
+            ]);
+        }
+
+        try {
+            return new Bond(
+                figi: $data['figi'],
+                ticker: $data['ticker'],
+                classCode: $data['classCode'] ?? '',
+                isin: $data['isin'],
+                lot: isset($data['lot']) ? (int)$data['lot'] : 1,
+                currency: $data['currency'] ?? 'RUB',
+                klong: isset($data['klong']) ? Quotation::fromApi($data['klong']) : new Quotation("0", 0),
+                kshort: isset($data['kshort']) ? Quotation::fromApi($data['kshort']) : new Quotation("0", 0),
+                dlong: isset($data['dlong']) ? Quotation::fromApi($data['dlong']) : new Quotation("0", 0),
+                dshort: isset($data['dshort']) ? Quotation::fromApi($data['dshort']) : new Quotation("0", 0),
+                dlongMin: isset($data['dlongMin']) ? Quotation::fromApi($data['dlongMin']) : new Quotation("0", 0),
+                dshortMin: isset($data['dshortMin']) ? Quotation::fromApi($data['dshortMin']) : new Quotation("0", 0),
+                shortEnabledFlag: (bool)($data['shortEnabledFlag'] ?? false),
+                name: $data['name'],
+                exchange: $data['exchange'],
+                couponQuantityPerYear: isset($data['couponQuantityPerYear']) ? (int)$data['couponQuantityPerYear'] : 0,
+                minPriceIncrement: isset($data['minPriceIncrement']) ? Quotation::fromApi($data['minPriceIncrement']) : new Quotation("0", 0),
+                apiTradeAvailableFlag: (bool)($data['apiTradeAvailableFlag'] ?? false),
+                realExchange: RealExchange::fromApi($data['realExchange']),
+                maturityDate: isset($data['maturityDate']) ? new DateTimeImmutable($data['maturityDate']) : null,
+                nominal: isset($data['nominal']) ? MoneyValue::fromApi($data['nominal']) : null,
+                initialNominal: isset($data['initialNominal']) ? MoneyValue::fromApi($data['initialNominal']) : null,
+                stateRegDate: isset($data['stateRegDate']) ? new DateTimeImmutable($data['stateRegDate']) : null,
+                placementDate: isset($data['placementDate']) ? new DateTimeImmutable($data['placementDate']) : null,
+                placementPrice: isset($data['placementPrice']) ? MoneyValue::fromApi($data['placementPrice']) : null,
+                aciValue: isset($data['aciValue']) ? MoneyValue::fromApi($data['aciValue']) : null,
+                countryOfRisk: $data['countryOfRisk'] ?? null,
+                countryOfRiskName: $data['countryOfRiskName'] ?? null,
+                sector: $data['sector'] ?? null,
+                issueKind: $data['issueKind'] ?? null,
+                issueSize: isset($data['issueSize']) ? (int)$data['issueSize'] : null,
+                issueSizePlan: isset($data['issueSizePlan']) ? (int)$data['issueSizePlan'] : null,
+                tradingStatus: isset($data['tradingStatus']) ? SecurityTradingStatus::fromApi($data['tradingStatus']) : null,
+                otcFlag: (bool)($data['otcFlag'] ?? false),
+                buyAvailableFlag: (bool)($data['buyAvailableFlag'] ?? false),
+                sellAvailableFlag: (bool)($data['sellAvailableFlag'] ?? false),
+                floatingCouponFlag: (bool)($data['floatingCouponFlag'] ?? false),
+                perpetualFlag: (bool)($data['perpetualFlag'] ?? false),
+                amortizationFlag: (bool)($data['amortizationFlag'] ?? false),
+                uid: $data['uid'] ?? null,
+                positionUid: $data['positionUid'] ?? null,
+                forIisFlag: (bool)($data['forIisFlag'] ?? false),
+                forQualInvestorFlag: (bool)($data['forQualInvestorFlag'] ?? false),
+                weekendFlag: (bool)($data['weekendFlag'] ?? false),
+                blockedTcaFlag: (bool)($data['blockedTcaFlag'] ?? false),
+                subordinatedFlag: (bool)($data['subordinatedFlag'] ?? false),
+                liquidityFlag: (bool)($data['liquidityFlag'] ?? false),
+                first1minCandleDate: isset($data['first1minCandleDate']) ? new DateTimeImmutable($data['first1minCandleDate']) : null,
+                first1dayCandleDate: isset($data['first1dayCandleDate']) ? new DateTimeImmutable($data['first1dayCandleDate']) : null,
+                riskLevel: isset($data['riskLevel']) ? RiskLevel::fromApi($data['riskLevel']) : null
+            );
+        } catch (\InvalidArgumentException $e) {
+            throw BondsServiceException::invalidBondResponse([
+                'message' => 'Invalid bond field values',
+                'error' => $e->getMessage()
+            ]);
+        }
     }
 
     /**
@@ -325,8 +392,8 @@ final class BondsService
                 function (array $couponData): ?Coupon {
                     try {
                         return $this->transformCoupon($couponData);
-                    } catch (Exception) {
-                        return null;
+                    } catch (\Exception $e) {
+                        throw BondsServiceException::invalidCouponData($couponData);
                     }
                 },
                 $couponsData
@@ -339,10 +406,23 @@ final class BondsService
      *
      * @param array $data Данные купона
      * @return Coupon Объект купона
-     * @throws InvalidArgumentException|Exception
+     * @throws BondsServiceException
      */
     private function transformCoupon(array $data): Coupon
     {
+        $requiredFields = [
+            'figi', 'couponDate', 'couponNumber', 'payOneBond',
+            'couponType', 'couponStartDate', 'couponEndDate', 'couponPeriod'
+        ];
+
+        $missingFields = array_diff($requiredFields, array_keys($data));
+        if (!empty($missingFields)) {
+            throw BondsServiceException::invalidCouponData([
+                'message' => 'Missing required coupon fields',
+                'missingFields' => $missingFields
+            ]);
+        }
+
         return new Coupon(
             figi: $data['figi'],
             couponDate: new DateTimeImmutable($data['couponDate']),
@@ -361,10 +441,17 @@ final class BondsService
      *
      * @param array $data Данные НКД
      * @return AccruedInterest Объект НКД
-     * @throws InvalidArgumentException|Exception
+     * @throws BondsServiceException|\Exception
      */
     private function transformAccruedInterest(array $data): AccruedInterest
     {
+        $requiredFields = ['date', 'value', 'valuePercent', 'nominal'];
+        foreach ($requiredFields as $field) {
+            if (!isset($data[$field])) {
+                throw BondsServiceException::invalidAccruedInterest($data);
+            }
+        }
+
         return new AccruedInterest(
             date: new DateTimeImmutable($data['date']),
             value: Quotation::fromApi($data['value']),
@@ -378,10 +465,14 @@ final class BondsService
      *
      * @param array $asset Данные по активам
      * @return AssetBond Объект данных по активам
-     * @throws InvalidArgumentException|Exception
+     * @throws BondsServiceException
      */
     private function transformAssetBond(array $asset): AssetBond
     {
+        if (!isset($asset['uid'], $asset['name'], $asset['instrument']['isin'], $asset['instrument']['ticker'])) {
+            throw BondsServiceException::invalidAssetData($asset);
+        }
+
         $bondData = $asset['instrument']['bond'] ?? [];
 
         return new AssetBond(
@@ -415,8 +506,8 @@ final class BondsService
                 function (array $eventData): ?BondEvent {
                     try {
                         return $this->transformBondEvent($eventData);
-                    } catch (Exception) {
-                        return null;
+                    } catch (\Exception $e) {
+                        throw BondsServiceException::invalidBondEvent($eventData);
                     }
                 },
                 $eventsData
@@ -429,17 +520,17 @@ final class BondsService
      *
      * @param array $data Данные события
      * @return BondEvent Объект события
-     * @throws InvalidArgumentException|Exception
-     */
-    /**
-     * Преобразует данные одного события облигации из API.
-     *
-     * @param array $data Данные события
-     * @return BondEvent Объект события
-     * @throws InvalidArgumentException|Exception
+     * @throws BondsServiceException|\Exception
      */
     private function transformBondEvent(array $data): BondEvent
     {
+        $requiredFields = ['instrumentId', 'eventNumber', 'eventDate', 'eventType', 'eventTotalVol'];
+        foreach ($requiredFields as $field) {
+            if (!isset($data[$field])) {
+                throw BondsServiceException::invalidBondEvent($data);
+            }
+        }
+
         return new BondEvent(
             instrumentId: $data['instrumentId'] ?? '',
             eventNumber: (int)($data['eventNumber'] ?? 0),
