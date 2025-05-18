@@ -1,44 +1,59 @@
 <?php
-
 namespace Tinkoff\Invest;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\LoggerTrait;
-use RuntimeException;
+use Tinkoff\Invest\Exceptions\LoggerException;
 
 class Logger implements LoggerInterface
 {
     use LoggerTrait;
 
     private $logFile;
-    private bool $logFullResponses;
-    private array $sensitiveParams = ['token', 'password', 'authorization'];
+    private bool $logSensitiveData;
+    private bool $fullLogging;
+    private array $sensitiveParams = ['token', 'password', 'authorization', 'api_key'];
 
-    public function __construct(
-        Config $config,
-        bool $logFullResponses = false
-    ) {
-        if ($config->isLoggingEnabled()) {
-            $logPath = $config->getLogPath();
-            $dir = dirname($logPath);
+    public function __construct(Config $config)
+    {
+        $this->logSensitiveData = $config->isLoggingSensitiveData();
+        $this->fullLogging = $config->isLoggingFull();
 
-            if (!is_dir($dir) && !mkdir($dir, 0777, true) && !is_dir($dir)) {
-                throw new RuntimeException("Cannot create log directory: {$dir}");
-            }
-
-            $this->logFile = fopen($logPath, 'ab');
-            if (!is_resource($this->logFile)) {
-                throw new RuntimeException("Cannot open log file: {$logPath}");
-            }
+        if (!$config->isLoggingEnabled()) {
+            return;
         }
 
-        $this->logFullResponses = $logFullResponses;
+        $logPath = $config->getLogPath();
+        $dir = dirname($logPath);
+
+        try {
+            if (!is_dir($dir)) {
+                if (!@mkdir($dir, 0755, true) && !is_dir($dir)) {
+                    throw LoggerException::logDirectoryCreationFailed($dir);
+                }
+            }
+
+            $this->logFile = @fopen($logPath, 'ab');
+            if ($this->logFile === false) {
+                throw LoggerException::logFileOpenFailed($logPath);
+            }
+        } catch (\Throwable $e) {
+            throw LoggerException::logDirectoryCreationFailed(
+                $logPath,
+                [
+                    'error' => $e->getMessage(),
+                    'logging_enabled' => $config->isLoggingEnabled(),
+                    'log_path' => $logPath
+                ],
+                $e
+            );
+        }
     }
 
     public function log($level, $message, array $context = []): void
     {
         if (!$this->logFile) {
-            return;
+            throw LoggerException::resourceNotAvailable();
         }
 
         $record = [
@@ -48,14 +63,27 @@ class Logger implements LoggerInterface
             'context' => $this->sanitizeContext($context)
         ];
 
-        fwrite($this->logFile, json_encode($record, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL);
+        try {
+            $logLine = json_encode($record, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+            if (fwrite($this->logFile, $logLine) === false) {
+                throw LoggerException::logWriteFailed("Failed to write log entry");
+            }
+        } catch (\Throwable $e) {
+            throw LoggerException::logWriteFailed(
+                $e->getMessage(),
+                [
+                    'log_record' => $record,
+                    'error' => $e->getMessage()
+                ],
+                $e
+            );
+        }
     }
 
     public function logApiRequest(string $requestId, string $method, string $uri, array $params): void
     {
         $this->info('API Request', [
             'request_id' => $requestId,
-            'type' => 'request',
             'method' => $method,
             'uri' => $this->shortenUri($uri),
             'params' => $this->sanitizeParams($params)
@@ -65,23 +93,38 @@ class Logger implements LoggerInterface
     public function logApiResponse(string $requestId, string $method, string $uri, array $response, float $startTime): void
     {
         $duration = round((microtime(true) - $startTime) * 1000, 2);
-
         $logData = [
             'request_id' => $requestId,
-            'type' => 'response',
             'method' => $method,
             'uri' => $this->shortenUri($uri),
             'duration_ms' => $duration,
             'status' => $response['status'] ?? 'success'
         ];
 
-        if ($this->logFullResponses) {
+        if ($this->fullLogging) {
             $logData['response'] = $response;
         } else {
             $logData['response_summary'] = $this->summarizeResponse($response);
         }
 
         $this->info('API Response', $logData);
+    }
+
+    public function logError(string $requestId, \Throwable $e, array $context = []): void
+    {
+        $errorData = [
+            'request_id' => $requestId,
+            'error' => $e->getMessage(),
+            'code' => $e->getCode(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine()
+        ];
+
+        if ($this->fullLogging) {
+            $errorData['trace'] = $this->filterTrace($e->getTrace());
+        }
+
+        $this->error(get_class($e), array_merge($errorData, $context));
     }
 
     private function shortenUri(string $uri): string
@@ -91,29 +134,52 @@ class Logger implements LoggerInterface
 
     private function sanitizeParams(array $params): array
     {
-        foreach ($params as $key => $value) {
-            if (in_array(strtolower($key), $this->sensitiveParams, true)) {
-                $params[$key] = '***REDACTED***';
-            }
+        if ($this->logSensitiveData) {
+            return $params;
         }
+
+        array_walk_recursive($params, function (&$value, $key) {
+            if (in_array(strtolower($key), $this->sensitiveParams, true)) {
+                $value = '***REDACTED***';
+            }
+        });
+
         return $params;
     }
 
     private function sanitizeContext(array $context): array
     {
+        if ($this->logSensitiveData) {
+            return $context;
+        }
+
         array_walk_recursive($context, function (&$value, $key) {
             if (in_array(strtolower($key), $this->sensitiveParams, true)) {
                 $value = '***REDACTED***';
             }
         });
+
         return $context;
+    }
+
+    private function filterTrace(array $trace): array
+    {
+        return array_map(function ($item) {
+            return [
+                'file' => $item['file'] ?? null,
+                'line' => $item['line'] ?? null,
+                'class' => $item['class'] ?? null,
+                'function' => $item['function'] ?? null
+            ];
+        }, $trace);
     }
 
     private function summarizeResponse(array $response): array
     {
+        $payload = $response['payload'] ?? [];
         return [
-            'items_count' => count($response['payload'] ?? []),
-            'first_item' => $response['payload'][0] ?? null
+            'items_count' => is_countable($payload) ? count($payload) : 0,
+            'first_item' => $payload[0] ?? null
         ];
     }
 

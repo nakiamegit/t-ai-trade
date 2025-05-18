@@ -58,4 +58,9 @@ class Operation
         public array $childOperations = []
     ) {
     }
+
+    public function getChildOperations(): array
+    {
+        return $this->childOperations;
+    }
 }
