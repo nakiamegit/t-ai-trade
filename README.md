@@ -1,13 +1,62 @@
-https://developer.tbank.ru/invest/services/operations/methods#operationstate
-https://tinkoff.github.io/investAPI/operations/#getbrokerreport
+# T-AI Trade
 
-https://www.tbank.ru/invest/help/educate/how-it-works/ways-to-invest/bonds/
+**T-AI Trade** — это PHP-библиотека, предоставляющая удобный интерфейс для взаимодействия с [Tinkoff Invest API](https://tinkoff.github.io/investAPI/). Благодаря данной библиотеке вы можете легко управлять портфелем, получать информацию о финансовых инструментах, совершать операции и многое другое.
 
-https://russianinvestments.github.io/investAPI/operations/#operationstate
-https://habr.com/ru/companies/tbank/articles/709166/
-https://ru.hexlet.io/courses/php-introduction-to-oop/lessons/autoloading/theory_unit
-https://www.php-fig.org/psr/psr-4/
-https://tinkoff.github.io/investAPI/get_history/
+---
+
+## 📌 Возможности
+- Поддержка работы с облигациями, акциями, ETF, валютами и другими финансовыми инструментами.
+- Удобные модели данных (`Coupon`, `Bond`, `PortfolioPosition` и др.).
+- Работа с операциями: получение списка операций, фильтрация по датам и типам.
+- Поддержка различных типов счетов (TINKOFF, IIS, INVEST_BOX и т.д.).
+- Обработка ошибок с подробной информацией и HTTP-кодами.
+- Простая интеграция в существующие PHP-проекты.
+
+---
+
+## 🛠 Требования
+- PHP 8.1 или выше
+- Composer
+- Расширения: `ext-curl`, `ext-json`
+
+## 🔧 Установка
+Установите пакет через Composer:
+```bash
+composer require tinkoff/invest
+```
+
+---
+
+## 📦 Структура проекта
+```php
+// В разработке
+```
+
+---
+
+## 🚀 Пример использования
+```php
+// В разработке
+```
+
+---
+
+## 📝 Лицензия
+Этот проект распространяется под лицензией MIT. Подробнее смотрите в файле [LICENSE](LICENSE).
+
+---
+
+## 💬 Поддержка и вопросы
+Если у вас возникли вопросы или проблемы, создайте issue на GitHub.
+
+---
+
+> Разработано с ❤️ и уважением к открытым технологиям.
+
+--- 
 
 
-https://www.istockphoto.com/ru/%D0%B2%D0%B5%D0%BA%D1%82%D0%BE%D1%80%D0%BD%D0%B0%D1%8F/%D0%BA%D0%B0%D1%80%D0%BA%D0%B0%D1%81%D0%BD%D1%8B%D0%B5-%D1%8D%D0%BA%D1%80%D0%B0%D0%BD%D1%8B-%D0%B4%D0%B8%D0%B7%D0%B0%D0%B9%D0%BD-%D0%BF%D0%BE%D0%BB%D1%8C%D0%B7%D0%BE%D0%B2%D0%B0%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D0%BA%D0%BE%D0%B3%D0%BE-%D0%B8%D0%BD%D1%82%D0%B5%D1%80%D1%84%D0%B5%D0%B9%D1%81%D0%B0-%D0%BF%D0%B0%D0%BD%D0%B5%D0%BB%D0%B8-%D0%B8-%D0%BA%D0%BE%D0%BC%D0%BF%D0%BB%D0%B5%D0%BA%D1%82%D0%B0-ux-gm1328096493-412251135?irclickid=14i0ZbSDRxyKUerSXX0xy3gWUksyFV1xjVPix80&irgwc=1&cid=IS&utm_medium=affiliate&utm_source=Freepik+Company%2C+S.L.&clickid=14i0ZbSDRxyKUerSXX0xy3gWUksyFV1xjVPix80&utm_term=idp&utm_content=917949&irpid=39422
+
+
+
+
